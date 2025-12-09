@@ -1,0 +1,93 @@
+spring:
+  application:
+    name: MrPot
+
+  # === PostgreSQL（Railway pgvector 数据库）===
+  datasource:
+    # Railway 给的是 PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
+    url: jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}
+    username: ${PGUSER}
+    password: ${PGPASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: false
+
+  # === Redis（Railway Redis 实例）===
+  data:
+    redis:
+      # 你已经在环境变量里拼好了 REDIS_URL="redis://user:pass@host:port"
+      url: ${REDIS_URL}
+      timeout: 3000
+
+  cache:
+    type: redis
+
+  # === Spring AI 模型配置 ===
+  ai:
+    # --- OpenAI (ChatGPT / Embedding 做 RAG) ---
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      # Chat 模型（流式 SSE 用 ChatClient 配就行）
+      chat:
+        options:
+          model: gpt-4.1-mini
+          temperature: 0.3
+      # Embedding 模型，给 pgvector 用
+      embedding:
+        options:
+          model: text-embedding-3-small
+          dimensions: 1536
+
+    # --- DeepSeek ---
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          # 根据你想用的具体模型改：deepseek-chat / deepseek-reasoner 等
+          model: deepseek-chat
+          temperature: 0.2
+
+    # --- Google Gemini（通过 spring-ai-starter-model-google-genai） ---
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:}
+        chat:
+          options:
+            # 具体模型随你，用最新的 flash / pro 等
+            model: gemini-2.0-flash
+            temperature: 0.3
+
+    # === PGVector 向量库配置（RAG 用）===
+    vectorstore:
+      pgvector:
+        # 让 Spring AI 自动建表（第一次用很方便）
+        initialize-schema: true
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        # 要和你上面 embedding 模型维度一致
+        dimensions: 1536
+        # 默认使用主 DataSource（上面的 Postgres）
+
+    # === Chat Memory（starter 已经提供 in-memory 实现）===
+    # 如后面需要 JDBC/Redis ChatMemory，可以再单独配置
+    # chat:
+    #   memory:
+    #     # 这里一般保持默认即可
+    #     ...
+
+# === Actuator / 监控（可选）===
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
