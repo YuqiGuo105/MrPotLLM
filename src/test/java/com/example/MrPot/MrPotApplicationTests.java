@@ -14,7 +14,13 @@ import org.springframework.test.context.ActiveProfiles;
         properties = {
                 "spring.ai.model.chat=none",
                 "spring.ai.model.embedding=none",
-                "spring.ai.openai.api-key=test"
+                "spring.ai.openai.api-key=test",
+                "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
+                "spring.datasource.driver-class-name=org.h2.Driver",
+                "spring.datasource.username=sa",
+                "spring.datasource.password=",
+                "spring.ai.vectorstore.pgvector.enabled=false",
+                "spring.sql.init.mode=never"
         }
 )
 @ActiveProfiles("test")
