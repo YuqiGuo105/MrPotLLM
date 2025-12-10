@@ -14,9 +14,10 @@ public class RagRetrievalController {
     private final RagRetrievalService ragRetrievalService;
 
     /**
-     * 简单模式：
-     *  - 前端只传 question；topK/minScore 用默认值
-     *  请求示例：
+     * Simple mode:
+     *  - Frontend only sends the question; topK/minScore use default values.
+     *
+     *  Example request:
      *    GET /api/rag/retrieve?q=xxx
      */
     @GetMapping("/retrieve")
@@ -25,16 +26,17 @@ public class RagRetrievalController {
     ) {
         RagQueryRequest req = new RagQueryRequest(
                 question,
-                null,   // 使用 RagRetrievalService 默认 topK
-                null    // 使用 RagRetrievalService 默认 minScore
+                null,   // Use RagRetrievalService default topK
+                null    // Use RagRetrievalService default minScore
         );
         return ragRetrievalService.retrieve(req);
     }
 
     /**
-     * 高级模式：
-     *  - 前端可以控制 topK / minScore
-     *  请求示例：
+     * Advanced mode:
+     *  - Frontend can control topK / minScore.
+     *
+     *  Example request:
      *    POST /api/rag/retrieve
      *    {
      *      "question": "xxx",

@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * - Takes user input (question)
  * - Generates embedding
  * - Queries the vector store
- * - Applies basic filtering
+ * - Applies dynamic score filtering
  * - Builds LLM-ready context text
  *
  * This service does NOT call any chat/LLM APIs.
@@ -28,8 +28,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RagRetrievalService {
 
+    // How many candidate documents to fetch from the vector store per query
     private static final int DEFAULT_TOP_K = 3;
-    private static final double DEFAULT_MIN_SCORE = 0.60;
+
+    // Absolute score floor (to avoid returning very low-quality results)
+    private static final double DEFAULT_MIN_SCORE = 0.20;
+
+    // Margin relative to the top1 score: keep only documents with score >= (topScore - margin)
+    private static final double TOP_SCORE_MARGIN = 0.10;
 
     private final EmbeddingModel embeddingModel;
     private final KbDocumentVectorRepository kbRepository;
@@ -39,14 +45,8 @@ public class RagRetrievalService {
      * 1. Extract question
      * 2. Embed question
      * 3. Query vector store
-     * 4. Filter by minScore
+     * 4. Dynamic filter by score
      * 5. Build LLM context
-     *
-     * @param request RAG query request from client
-     * @return retrieval result including:
-     *         - original question
-     *         - filtered documents
-     *         - formatted context string for LLM
      */
     public RagRetrievalResult retrieve(RagQueryRequest request) {
         // 1. Get user question
@@ -57,15 +57,13 @@ public class RagRetrievalService {
 
         // 3. Resolve retrieval parameters
         int topK = request.resolveTopK(DEFAULT_TOP_K);
-        double minScore = request.resolveMinScore(DEFAULT_MIN_SCORE);
+        double requestedMinScore = request.resolveMinScore(DEFAULT_MIN_SCORE);
 
-        // 4. Query vector store for topK nearest documents
+        // 4. Query vector store for topK nearest documents (raw retrieved)
         List<ScoredDocument> retrieved = kbRepository.findNearest(queryEmbedding, topK);
 
-        // 5. Filter by similarity score to remove low-quality matches
-        List<ScoredDocument> filtered = retrieved.stream()
-                .filter(doc -> doc.score() >= minScore)
-                .toList();
+        // 5. Dynamic filter by similarity score (relative to top1 + absolute floor)
+        List<ScoredDocument> filtered = applyDynamicScoreFilter(retrieved, requestedMinScore);
 
         // 6. Build textual context for LLM consumption
         String context = buildContext(filtered);
@@ -78,18 +76,41 @@ public class RagRetrievalService {
     }
 
     /**
+     * Dynamic threshold filtering logic:
+     *  - If there are no retrieved documents → return an empty list.
+     *  - topScore = score of the first (best) document.
+     *  - dynamicThreshold = max(DEFAULT_MIN_SCORE, requestedMinScore, topScore - TOP_SCORE_MARGIN)
+     *  - Keep only documents with score >= dynamicThreshold.
+     *  - If everything is filtered out, keep at least the top1 document.
+     */
+    private List<ScoredDocument> applyDynamicScoreFilter(List<ScoredDocument> retrieved,
+                                                         double requestedMinScore) {
+        if (retrieved == null || retrieved.isEmpty()) {
+            return List.of();
+        }
+
+        double topScore = retrieved.getFirst().score();
+
+        double dynamicThreshold = Math.max(
+                DEFAULT_MIN_SCORE,
+                Math.max(requestedMinScore, topScore - TOP_SCORE_MARGIN)
+        );
+
+        List<ScoredDocument> filtered = retrieved.stream()
+                .filter(doc -> doc.score() >= dynamicThreshold)
+                .toList();
+
+        // Safety: if the threshold is too high and filters out everything, keep at least top1
+        if (filtered.isEmpty()) {
+            return List.of(retrieved.getFirst());
+        }
+
+        return filtered;
+    }
+
+    /**
      * Convert a list of scored documents into a single context string
      * that can be injected into an LLM system prompt.
-     *
-     * Example format:
-     *   【docId=..., type=..., score=0.873】
-     *   document content...
-     *
-     *   【docId=..., type=..., score=0.751】
-     *   document content...
-     *
-     * @param docs scored documents from vector store
-     * @return concatenated context string
      */
     public String buildContext(List<ScoredDocument> docs) {
         if (docs == null || docs.isEmpty()) {
