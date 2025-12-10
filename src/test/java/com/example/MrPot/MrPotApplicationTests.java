@@ -6,8 +6,6 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
-import org.springframework.boot.autoconfigure.ai.vectorstore.pgvector.PgVectorStoreAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
@@ -27,7 +25,6 @@ import org.springframework.test.context.ActiveProfiles;
         }
 )
 @ActiveProfiles("test")
-@ImportAutoConfiguration(exclude = PgVectorStoreAutoConfiguration.class)
 @Import(MrPotApplicationTests.TestAiConfiguration.class)
 class MrPotApplicationTests {
 
