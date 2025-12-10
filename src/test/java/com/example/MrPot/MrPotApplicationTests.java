@@ -1,10 +1,13 @@
 package com.example.MrPot;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest(
@@ -15,15 +18,23 @@ import org.springframework.test.context.ActiveProfiles;
         }
 )
 @ActiveProfiles("test")
+@Import(MrPotApplicationTests.TestAiConfiguration.class)
 class MrPotApplicationTests {
-
-    @MockBean
-    private EmbeddingModel embeddingModel;
-
-    @MockBean
-    private OpenAiChatModel openAiChatModel;
 
     @Test
     void contextLoads() {
+    }
+
+    @TestConfiguration
+    static class TestAiConfiguration {
+        @Bean
+        EmbeddingModel embeddingModel() {
+            return Mockito.mock(EmbeddingModel.class);
+        }
+
+        @Bean
+        OpenAiChatModel openAiChatModel() {
+            return Mockito.mock(OpenAiChatModel.class);
+        }
     }
 }
