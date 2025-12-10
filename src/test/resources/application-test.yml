@@ -1,4 +1,8 @@
 spring:
+  # 在测试环境直接排除 pgvector 自动装配，避免 H2 执行 PostgreSQL 专属的扩展语句
+  autoconfigure:
+    exclude: org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
+
   datasource:
     url: jdbc:h2:mem:mrpot_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
@@ -13,6 +17,11 @@ spring:
       embedding: none
     openai:
       api-key: test
+
+    # 在测试环境关闭 pgvector 相关自动配置，避免 H2 执行 PostgreSQL 扩展语句
+    vectorstore:
+      pgvector:
+        enabled: false
 
   flyway:
     enabled: false
