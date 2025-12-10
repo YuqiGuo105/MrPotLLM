@@ -5,7 +5,8 @@ spring:
   # === PostgreSQL（Railway pgvector 数据库）===
   datasource:
     # Railway 给的是 PGHOST / PGPORT / PGDATABASE / PGUSER / PGPASSWORD
-    url: jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}
+    # 提供默认 host/port，避免环境变量缺失时端口字符串未展开导致 JDBC URL 无效
+    url: jdbc:postgresql://${PGHOST:localhost}:${PGPORT:5432}/${PGDATABASE}
     username: ${PGUSER}
     password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
