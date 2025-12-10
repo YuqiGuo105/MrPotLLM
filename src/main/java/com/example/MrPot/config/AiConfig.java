@@ -19,8 +19,6 @@ public class AiConfig {
      */
     @Bean
     @Primary
-    @Qualifier("deepseekChatClient")
-    @ConditionalOnBean(DeepSeekChatModel.class)
     public ChatClient deepseekChatClient(DeepSeekChatModel model) {
         return ChatClient.builder(model)
                 .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
@@ -33,8 +31,6 @@ public class AiConfig {
      * (so missing OpenAI API key will not break the app).
      */
     @Bean
-    @Qualifier("openaiChatClient")
-    @ConditionalOnBean(OpenAiChatModel.class)
     public ChatClient openaiChatClient(OpenAiChatModel model) {
         return ChatClient.builder(model)
                 .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
