@@ -1,25 +1,41 @@
 package com.example.MrPot.config;
 
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
-import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Primary;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 
 @Configuration
 public class AiConfig {
+
+    /**
+     * DeepSeek is the default ChatClient.
+     * This bean is only created when a DeepSeekChatModel bean exists
+     * (so the app won't fail to start if the DeepSeek API key is missing in some envs).
+     */
     @Bean
-    @Qualifier("openaiChatClient")
-    public ChatClient openaiChatClient(OpenAiChatModel model) {
+    @Primary
+    @Qualifier("deepseekChatClient")
+    @ConditionalOnBean(DeepSeekChatModel.class)
+    public ChatClient deepseekChatClient(DeepSeekChatModel model) {
         return ChatClient.builder(model)
                 .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
                 .build();
     }
 
+    /**
+     * OpenAI ChatClient as an alternative.
+     * This bean is only created when an OpenAiChatModel bean exists
+     * (so missing OpenAI API key will not break the app).
+     */
     @Bean
-    @Qualifier("deepseekChatClient")
-    public ChatClient deepseekChatClient(DeepSeekChatModel model) {
+    @Qualifier("openaiChatClient")
+    @ConditionalOnBean(OpenAiChatModel.class)
+    public ChatClient openaiChatClient(OpenAiChatModel model) {
         return ChatClient.builder(model)
                 .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
                 .build();

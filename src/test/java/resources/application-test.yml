@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:mrpot_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  # 测试环境直接禁用 Spring AI 的自动模型装配，
+  # 再配合 @MockBean EmbeddingModel，保证不会访问外部服务
+  ai:
+    model:
+      chat: none
+      embedding: none
+    openai:
+      api-key: test
+
+  flyway:
+    enabled: false
+
+# 日志可以略微安静一点
+logging:
+  level:
+    org.springframework: INFO
+    com.example.MrPot: DEBUG
