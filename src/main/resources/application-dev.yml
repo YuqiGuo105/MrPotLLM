@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${PGHOST:postgres}:${PGPORT:5432}/${PGDATABASE:mrpot}
+    username: ${PGUSER:postgres}
+    password: ${PGPASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: false
+
+  data:
+    redis:
+      url: redis://${REDIS_USERNAME:default}:${REDIS_PASSWORD:redis}@${REDIS_HOST:redis}:${REDIS_PORT:6379}
+      timeout: 3000
+
+  cache:
+    type: redis
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui
+  api-docs:
+    path: /v3/api-docs

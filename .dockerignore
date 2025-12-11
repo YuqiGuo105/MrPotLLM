@@ -1,0 +1,12 @@
+# Build output
+/target
+
+# Git data
+/.git
+/.gitignore
+
+# IDE / OS files
+/.idea
+*.iml
+*.log
+.DS_Store
