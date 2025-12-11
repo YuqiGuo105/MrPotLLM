@@ -15,9 +15,6 @@ public class WebGuideToolFunction implements Function<WebGuideToolFunction.Reque
 
     private static final Logger log = LoggerFactory.getLogger(WebGuideToolFunction.class);
 
-    // TODO: Inject your state service here (e.g. Redis guide state service)
-    // private final WebGuideStateService stateService;
-
     public record Request(
             String userQuestion
             // You can expand fields in future: currentPage, language, etc.
