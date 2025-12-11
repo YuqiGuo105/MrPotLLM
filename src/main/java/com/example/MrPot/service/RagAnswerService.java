@@ -47,10 +47,15 @@ public class RagAnswerService {
         ToolProfile profile = request.resolveToolProfile(ToolProfile.BASIC_CHAT);
         List<String> toolBeanNames = toolRegistry.getFunctionBeanNamesForProfile(profile);
 
-        var response = chatClient.prompt()
+        var promptSpec = chatClient.prompt()
                 .system("You are Mr Pot, a helpful assistant. Use the provided context and chat history to answer succinctly.")
-                .user(prompt)
-                .call();
+                .user(prompt);
+
+        if (!toolBeanNames.isEmpty()) {
+            promptSpec = promptSpec.toolNames(toolBeanNames.toArray(String[]::new));
+        }
+
+        var response = promptSpec.call();
 
         String answer = response.content();
         chatMemoryService.appendTurn(session.id(), request.question(), answer, session.temporary());
@@ -69,11 +74,20 @@ public class RagAnswerService {
         var history = chatMemoryService.loadHistory(session.id());
         String prompt = buildPrompt(request.question(), retrieval, chatMemoryService.renderHistory(history));
 
+        ToolProfile profile = request.resolveToolProfile(ToolProfile.BASIC_CHAT);
+        List<String> toolBeanNames = toolRegistry.getFunctionBeanNamesForProfile(profile);
+
         AtomicReference<StringBuilder> aggregate = new AtomicReference<>(new StringBuilder());
 
-        return chatClient.prompt()
+        var promptSpec = chatClient.prompt()
                 .system("You are Mr Pot. Answer succinctly in the user's language using the given context and history.")
-                .user(prompt)
+                .user(prompt);
+
+        if (!toolBeanNames.isEmpty()) {
+            promptSpec = promptSpec.toolNames(toolBeanNames.toArray(String[]::new));
+        }
+
+        return promptSpec
                 .stream()
                 .content()
                 // Collect all deltas so we can persist the full answer at the end
@@ -134,13 +148,21 @@ public class RagAnswerService {
             String historyText = chatMemoryService.renderHistory(history);
             String prompt = buildPrompt(request.question(), retrieval, historyText);
             ChatClient chatClient = resolveClient(request.resolveModel());
+            ToolProfile profile = request.resolveToolProfile(ToolProfile.BASIC_CHAT);
+            List<String> toolBeanNames = toolRegistry.getFunctionBeanNamesForProfile(profile);
 
             // LLM streaming output → answer_delta stage
-            Flux<ThinkingEvent> answerDeltaStep = chatClient.prompt()
+            var promptSpec = chatClient.prompt()
                     .system("You are Mr Pot, a helpful assistant. " +
                             "Answer succinctly in the user's language, " +
                             "using only the provided context and chat history.")
-                    .user(prompt)
+                    .user(prompt);
+
+            if (!toolBeanNames.isEmpty()) {
+                promptSpec = promptSpec.toolNames(toolBeanNames.toArray(String[]::new));
+            }
+
+            Flux<ThinkingEvent> answerDeltaStep = promptSpec
                     .stream()
                     .content()
                     .map(delta -> {
