@@ -48,7 +48,8 @@ public class RagAnswerService {
         List<String> toolBeanNames = toolRegistry.getFunctionBeanNamesForProfile(profile);
 
         var response = chatClient.prompt()
-                .system("You are Mr Pot, a helpful assistant. Use the provided context and chat history to answer succinctly.")
+                .system("You're Mr Pot, Yuqi's LLM Agent. Answer succinctly in the user's language using only the provided context and chat history. " +
+                        "If the question is outside the context or knowledge base, reply exactly: \"I can only answer questions related to Yuqi Guo\".")
                 .user(prompt)
                 .call();
 
@@ -72,7 +73,8 @@ public class RagAnswerService {
         AtomicReference<StringBuilder> aggregate = new AtomicReference<>(new StringBuilder());
 
         return chatClient.prompt()
-                .system("You are Mr Pot. Answer succinctly in the user's language using the given context and history.")
+                .system("You're Mr Pot, Yuqi's LLM Agent. Answer succinctly in the user's language using only the provided context and history. " +
+                        "If the content is unrelated to the user's question or outside the knowledge base, reply exactly: \"I can only answer questions related to Yuqi Guo\".")
                 .user(prompt)
                 .stream()
                 .content()
@@ -137,9 +139,8 @@ public class RagAnswerService {
 
             // LLM streaming output → answer_delta stage
             Flux<ThinkingEvent> answerDeltaStep = chatClient.prompt()
-                    .system("You are Mr Pot, a helpful assistant. " +
-                            "Answer succinctly in the user's language, " +
-                            "using only the provided context and chat history.")
+                    .system("You're Mr Pot, Yuqi's LLM Agent. Answer succinctly in the user's language using only the provided context and chat history. " +
+                            "If the question is outside the context or the content is unrelated, reply exactly: \"I can only answer questions related to Yuqi Guo\".")
                     .user(prompt)
                     .stream()
                     .content()
