@@ -1,12 +1,15 @@
 package com.example.MrPot.service;
 
+import com.example.MrPot.model.KbDocument;
 import com.example.MrPot.model.RagAnswer;
 import com.example.MrPot.model.RagAnswerRequest;
 import com.example.MrPot.model.RagQueryRequest;
 import com.example.MrPot.model.RagRetrievalResult;
+import com.example.MrPot.model.ScoredDocument;
 import com.example.MrPot.model.ThinkingEvent;
 import com.example.MrPot.tools.ToolProfile;
 import com.example.MrPot.tools.ToolRegistry;
+import com.example.MrPot.util.QaExtractor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
@@ -30,6 +33,12 @@ public class RagAnswerService {
 
     private static final int DEFAULT_TOP_K = 3;
     private static final double DEFAULT_MIN_SCORE = 0.60;
+    private static final double QA_DIRECT_MIN_SCORE = 0.72;
+    private static final double QA_DIRECT_MARGIN = 0.08;
+
+    private enum QaDirectMode {RAW, REFER}
+
+    private static final QaDirectMode QA_DIRECT_MODE = QaDirectMode.RAW;
 
     /**
      * Non-streaming RAG answer:
@@ -121,6 +130,10 @@ public class RagAnswerService {
                         .subscribeOn(Schedulers.boundedElastic())
                         .cache(); // Ensure only one actual retrieval per subscription
 
+        Mono<Optional<String>> directAnswerMono = retrievalMono
+                .map(result -> tryDirectQaAnswer(result.documents(), request.question()))
+                .cache();
+
         // --- Stage 0: "start" -> fire immediately for ultra-low first-byte latency ---
         Flux<ThinkingEvent> startStep = Flux.just(
                 new ThinkingEvent(
@@ -154,10 +167,23 @@ public class RagAnswerService {
 
         // --- Stage 3: "answer_delta" -> LLM streaming token output ---
         Flux<ThinkingEvent> answerDeltaStep =
-                Mono.zip(historyMono, retrievalMono)
+                Mono.zip(historyMono, retrievalMono, directAnswerMono)
                         .flatMapMany(tuple -> {
                             var history = tuple.getT1();
                             var retrieval = tuple.getT2();
+                            var directAnswer = tuple.getT3();
+
+                            if (directAnswer.isPresent()) {
+                                String answer = directAnswer.get();
+                                aggregate.set(new StringBuilder(answer));
+                                return Flux.just(
+                                        new ThinkingEvent(
+                                                "answer_final",
+                                                "Direct Q/A hit.",
+                                                answer
+                                        )
+                                );
+                            }
 
                             String historyText = chatMemoryService.renderHistory(history);
                             String prompt = buildPrompt(
@@ -194,15 +220,20 @@ public class RagAnswerService {
                         });
 
         // --- Stage 4: "answer_final" -> emit the complete answer at the end ---
-        Flux<ThinkingEvent> finalStep = Flux.defer(() ->
-                Flux.just(
-                        new ThinkingEvent(
-                                "answer_final",
-                                "Finalized answer.",
-                                aggregate.get().toString()
-                        )
-                )
-        );
+        Flux<ThinkingEvent> finalStep = directAnswerMono.flatMapMany(directAnswer -> {
+            if (directAnswer.isPresent()) {
+                return Flux.empty();
+            }
+            return Flux.defer(() ->
+                    Flux.just(
+                            new ThinkingEvent(
+                                    "answer_final",
+                                    "Finalized answer.",
+                                    aggregate.get().toString()
+                            )
+                    )
+            );
+        });
 
         // Final order:
         //  start → redis → rag → answer_delta* → answer_final
@@ -218,6 +249,67 @@ public class RagAnswerService {
                 request.resolveTopK(DEFAULT_TOP_K),
                 request.resolveMinScore(DEFAULT_MIN_SCORE)
         );
+    }
+
+    private Optional<String> tryDirectQaAnswer(List<ScoredDocument> docs, String userQuestion) {
+        if (docs == null || docs.isEmpty()) {
+            return Optional.empty();
+        }
+
+        ScoredDocument top = docs.get(0);
+        double topScore = top.score();
+        double secondScore = docs.size() > 1 ? docs.get(1).score() : 0.0;
+
+        if (topScore < QA_DIRECT_MIN_SCORE) {
+            return Optional.empty();
+        }
+        if (docs.size() > 1 && (topScore - secondScore) < QA_DIRECT_MARGIN) {
+            return Optional.empty();
+        }
+
+        KbDocument topDoc = top.document();
+        String docType = topDoc != null ? topDoc.getDocType() : null;
+        String text = pickBestText(top);
+        boolean isChatQa = docType != null && docType.equalsIgnoreCase("chat_qa");
+        if (!isChatQa) {
+            if (text == null) {
+                return Optional.empty();
+            }
+            boolean looksLikeQa = (text.contains("【问题】") && text.contains("【回答】"))
+                    || (text.toLowerCase().contains("[q]") && text.toLowerCase().contains("[a]"))
+                    || text.matches("(?is).*\\bQ\\s*[:：].*\\bA\\s*[:：].*");
+            if (!looksLikeQa) {
+                return Optional.empty();
+            }
+        }
+
+        return QaExtractor.extract(text)
+                .map(pair -> {
+                    String answer = pair.answer().trim();
+                    if (QA_DIRECT_MODE == QaDirectMode.REFER) {
+                        return "Reference KB answer:\n" + answer;
+                    }
+                    return answer;
+                });
+    }
+
+    private String pickBestText(ScoredDocument scoredDocument) {
+        if (scoredDocument == null || scoredDocument.document() == null) {
+            return null;
+        }
+        KbDocument document = scoredDocument.document();
+        if (document.getContent() != null && !document.getContent().isBlank()) {
+            return document.getContent();
+        }
+        if (document.getMetadata() != null) {
+            if (document.getMetadata().hasNonNull("fullText")) {
+                return document.getMetadata().get("fullText").asText();
+            }
+            if (document.getMetadata().hasNonNull("preview")) {
+                return document.getMetadata().get("preview").asText();
+            }
+        }
+        return null;
     }
 
     /**
