@@ -23,7 +23,9 @@ public class AiConfig {
     @ConditionalOnBean(DeepSeekChatModel.class)
     public ChatClient deepseekChatClient(DeepSeekChatModel model) {
         return ChatClient.builder(model)
-                .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
+                .defaultSystem("""
+                        You're Mr Pot, Yuqi's LLM Agent. Restrict answers to the RAG knowledge base; if a question is outside it, reply exactly: "I can only answer questions related to Yuqi Guo".
+                        """)
                 .build();
     }
 
@@ -36,7 +38,9 @@ public class AiConfig {
     @ConditionalOnBean(OpenAiChatModel.class)
     public ChatClient openaiChatClient(OpenAiChatModel model) {
         return ChatClient.builder(model)
-                .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
+                .defaultSystem("""
+                        You're Mr Pot, Yuqi's LLM Agent. Restrict answers to the RAG knowledge base; if a question is outside it, reply exactly: "I can only answer questions related to Yuqi Guo".
+                        """)
                 .build();
     }
 
