@@ -30,17 +30,19 @@ public class RagAnswerController {
         // 0L means no timeout (you can set a specific timeout instead if desired)
         SseEmitter emitter = new SseEmitter(0L);
 
+        // RAG + LLM streaming with low-latency thinking stages
+        // Stages: start / redis / rag / answer_delta / answer_final
         Flux<ThinkingEvent> stream = ragAnswerService.streamAnswerWithLogic(request);
 
-        // Subscribe to the RAG + LLM thinking stream
+        // Subscribe to the thinking stream and bridge it into SSE events
         Disposable subscription = stream.subscribe(
                 event -> {
                     try {
-                        // Use stage as the SSE event name; frontend can handle each stage separately
+                        // Use stage as SSE event name so frontend can handle each stage separately
                         emitter.send(
                                 SseEmitter.event()
                                         .name(event.stage())
-                                        .data(event)         // ThinkingEvent will be serialized as JSON
+                                        .data(event)   // ThinkingEvent will be serialized as JSON
                         );
                     } catch (IOException e) {
                         emitter.completeWithError(e);
@@ -59,5 +61,4 @@ public class RagAnswerController {
 
         return emitter;
     }
-
 }

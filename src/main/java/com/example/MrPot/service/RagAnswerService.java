@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 import java.util.Map;
@@ -87,96 +89,124 @@ public class RagAnswerService {
     }
 
     /**
-     * Streaming answer WITH logic chain metadata.
+     * Streaming answer WITH logic chain metadata, optimized for lower latency.
      *
      * Stages:
+     *  - "start": request accepted, pipeline initialized
      *  - "redis": loaded previous conversation from Redis
      *  - "rag": searched knowledge base for related documents
      *  - "answer_delta": LLM token stream
      *  - "answer_final": final aggregated answer
-     *
-     * This is suitable for SSE / WebSocket to render a "thinking" UI.
      */
     public Flux<ThinkingEvent> streamAnswerWithLogic(RagAnswerRequest request) {
-        // Rebuild the entire pipeline for each subscription
-        return Flux.defer(() -> {
+        // --- Resolve session and client up front (cheap operations) ---
+        RagAnswerRequest.ResolvedSession session = request.resolveSession();
+        ChatClient chatClient = resolveClient(request.resolveModel());
 
-            // Container to aggregate LLM tokens (one per subscription)
-            AtomicReference<StringBuilder> aggregate =
-                    new AtomicReference<>(new StringBuilder());
+        // Per-subscription buffer for the aggregated answer text
+        AtomicReference<StringBuilder> aggregate =
+                new AtomicReference<>(new StringBuilder());
 
-            // --- 0) Resolve session information ---
-            RagAnswerRequest.ResolvedSession session = request.resolveSession();
+        // --- Async Redis history load ---
+        // Run on boundedElastic to avoid blocking main threads
+        Mono<List<RedisChatMemoryService.StoredMessage>> historyMono =
+                Mono.fromCallable(() -> chatMemoryService.loadHistory(session.id()))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .cache(); // Ensure only one actual Redis call per subscription
 
-            // --- 1) Load Redis history and emit the redis-stage event ---
-            var history = chatMemoryService.loadHistory(session.id());
+        // --- Async RAG retrieval ---
+        // Also run on boundedElastic since embedding + DB are blocking IO
+        Mono<RagRetrievalResult> retrievalMono =
+                Mono.fromCallable(() -> ragRetrievalService.retrieve(toQuery(request)))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .cache(); // Ensure only one actual retrieval per subscription
 
-            Flux<ThinkingEvent> redisStep = Flux.just(
-                    new ThinkingEvent(
-                            "redis",
-                            "Combined with previous conversation; some context from Redis chat history.",
-                            summarizeHistory(history)
-                    )
-            );
+        // --- Stage 0: "start" -> fire immediately for ultra-low first-byte latency ---
+        Flux<ThinkingEvent> startStep = Flux.just(
+                new ThinkingEvent(
+                        "start",
+                        "Request received. Initializing thinking pipeline.",
+                        Map.of("ts", System.currentTimeMillis())
+                )
+        );
 
-            // --- 2) Perform RAG retrieval and emit the rag-stage event ---
-            RagRetrievalResult retrieval = ragRetrievalService.retrieve(toQuery(request));
+        // --- Stage 1: "redis" -> emit once history is loaded ---
+        Flux<ThinkingEvent> redisStep = historyMono.flatMapMany(history ->
+                Flux.just(
+                        new ThinkingEvent(
+                                "redis",
+                                "Combined with previous conversation; some context from Redis chat history.",
+                                summarizeHistory(history)
+                        )
+                )
+        );
 
-            Flux<ThinkingEvent> ragStep = Flux.just(
-                    new ThinkingEvent(
-                            "rag",
-                            "Searching knowledge base for related content.",
-                            summarizeRetrieval(retrieval)
-                    )
-            );
+        // --- Stage 2: "rag" -> emit once RAG retrieval is done ---
+        Flux<ThinkingEvent> ragStep = retrievalMono.flatMapMany(retrieval ->
+                Flux.just(
+                        new ThinkingEvent(
+                                "rag",
+                                "Searching knowledge base for related content.",
+                                summarizeRetrieval(retrieval)
+                        )
+                )
+        );
 
-            // --- 3) Build prompt and ChatClient ---
-            String historyText = chatMemoryService.renderHistory(history);
-            String prompt = buildPrompt(request.question(), retrieval, historyText);
-            ChatClient chatClient = resolveClient(request.resolveModel());
+        // --- Stage 3: "answer_delta" -> LLM streaming token output ---
+        Flux<ThinkingEvent> answerDeltaStep =
+                Mono.zip(historyMono, retrievalMono)
+                        .flatMapMany(tuple -> {
+                            var history = tuple.getT1();
+                            var retrieval = tuple.getT2();
 
-            // LLM streaming output → answer_delta stage
-            Flux<ThinkingEvent> answerDeltaStep = chatClient.prompt()
-                    .system("You are Mr Pot, a helpful assistant. " +
-                            "Answer succinctly in the user's language, " +
-                            "using only the provided context and chat history.")
-                    .user(prompt)
-                    .stream()
-                    .content()
-                    .map(delta -> {
-                        // Accumulate tokens
-                        aggregate.get().append(delta);
-                        return new ThinkingEvent(
-                                "answer_delta",
-                                "Generating answer.",
-                                // Payload is the current delta text chunk
-                                delta
-                        );
-                    })
-                    .doFinally(signalType -> {
-                        // After LLM is done, persist the full answer into Redis chat memory
-                        chatMemoryService.appendTurn(
-                                session.id(),
-                                request.question(),
-                                aggregate.get().toString(),
-                                session.temporary()
-                        );
-                    });
+                            String historyText = chatMemoryService.renderHistory(history);
+                            String prompt = buildPrompt(
+                                    request.question(),
+                                    retrieval,
+                                    historyText
+                            );
 
-            // --- 4) Final answer_final stage, emit the complete answer ---
-            Flux<ThinkingEvent> finalStep = Flux.defer(() ->
-                    Flux.just(
-                            new ThinkingEvent(
-                                    "answer_final",
-                                    "Finalized answer.",
-                                    aggregate.get().toString()
-                            )
-                    )
-            );
+                            return chatClient.prompt()
+                                    .system("You are Mr Pot, a helpful assistant. " +
+                                            "Answer succinctly in the user's language, " +
+                                            "using only the provided context and chat history.")
+                                    .user(prompt)
+                                    .stream()
+                                    .content()
+                                    .map(delta -> {
+                                        // Aggregate all deltas into a single final answer
+                                        aggregate.get().append(delta);
+                                        return new ThinkingEvent(
+                                                "answer_delta",
+                                                "Generating answer.",
+                                                delta
+                                        );
+                                    });
+                        })
+                        .doFinally(signalType -> {
+                            // Persist the full answer in Redis chat memory once streaming finishes
+                            chatMemoryService.appendTurn(
+                                    session.id(),
+                                    request.question(),
+                                    aggregate.get().toString(),
+                                    session.temporary()
+                            );
+                        });
 
-            // Final order: redis → rag → answer_delta* → answer_final
-            return Flux.concat(redisStep, ragStep, answerDeltaStep, finalStep);
-        });
+        // --- Stage 4: "answer_final" -> emit the complete answer at the end ---
+        Flux<ThinkingEvent> finalStep = Flux.defer(() ->
+                Flux.just(
+                        new ThinkingEvent(
+                                "answer_final",
+                                "Finalized answer.",
+                                aggregate.get().toString()
+                        )
+                )
+        );
+
+        // Final order:
+        //  start → redis → rag → answer_delta* → answer_final
+        return Flux.concat(startStep, redisStep, ragStep, answerDeltaStep, finalStep);
     }
 
     /**
