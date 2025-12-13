@@ -5,6 +5,7 @@ import com.example.MrPot.model.RagAnswerRequest;
 import com.example.MrPot.model.RagQueryRequest;
 import com.example.MrPot.model.RagRetrievalResult;
 import com.example.MrPot.model.ThinkingEvent;
+import com.example.MrPot.service.ChatLogService;
 import com.example.MrPot.tools.ToolProfile;
 import com.example.MrPot.tools.ToolRegistry;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class RagAnswerService {
 
     private final RagRetrievalService ragRetrievalService;
     private final RedisChatMemoryService chatMemoryService;
+    private final ChatLogService chatLogService;
     private final Map<String, ChatClient> chatClients;
     private final ToolRegistry toolRegistry;
 
@@ -56,6 +58,7 @@ public class RagAnswerService {
 
         String answer = response.content();
         chatMemoryService.appendTurn(session.id(), request.question(), answer, session.temporary());
+        chatLogService.recordChat(session.id(), request.resolveModel(), request.question(), prompt, answer, retrieval.documents());
         return new RagAnswer(answer, retrieval.documents());
     }
 
@@ -85,6 +88,14 @@ public class RagAnswerService {
                         request.question(),
                         aggregate.get().toString(),
                         session.temporary()
+                ))
+                .doFinally(signalType -> chatLogService.recordChat(
+                        session.id(),
+                        request.resolveModel(),
+                        request.question(),
+                        prompt,
+                        aggregate.get().toString(),
+                        retrieval.documents()
                 ));
     }
 
@@ -107,6 +118,10 @@ public class RagAnswerService {
         AtomicReference<StringBuilder> aggregate =
                 new AtomicReference<>(new StringBuilder());
 
+        // Keep prompt and retrieval for logging once the stream completes
+        AtomicReference<String> promptRef = new AtomicReference<>("");
+        AtomicReference<RagRetrievalResult> retrievalRef = new AtomicReference<>();
+
         // --- Async Redis history load ---
         // Run on boundedElastic to avoid blocking main threads
         Mono<List<RedisChatMemoryService.StoredMessage>> historyMono =
@@ -119,6 +134,7 @@ public class RagAnswerService {
         Mono<RagRetrievalResult> retrievalMono =
                 Mono.fromCallable(() -> ragRetrievalService.retrieve(toQuery(request)))
                         .subscribeOn(Schedulers.boundedElastic())
+                        .doOnNext(retrievalRef::set)
                         .cache(); // Ensure only one actual retrieval per subscription
 
         // --- Stage 0: "start" -> fire immediately for ultra-low first-byte latency ---
@@ -165,6 +181,7 @@ public class RagAnswerService {
                                     retrieval,
                                     historyText
                             );
+                            promptRef.set(prompt);
 
                             return chatClient.prompt()
                                     .system("You are Mr Pot, a helpful assistant. " +
@@ -190,6 +207,16 @@ public class RagAnswerService {
                                     request.question(),
                                     aggregate.get().toString(),
                                     session.temporary()
+                            );
+                            chatLogService.recordChat(
+                                    session.id(),
+                                    request.resolveModel(),
+                                    request.question(),
+                                    promptRef.get(),
+                                    aggregate.get().toString(),
+                                    Optional.ofNullable(retrievalRef.get())
+                                            .map(RagRetrievalResult::documents)
+                                            .orElse(List.of())
                             );
                         });
 
