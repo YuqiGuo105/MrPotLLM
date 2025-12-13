@@ -23,7 +23,7 @@ public class AiConfig {
     @ConditionalOnBean(DeepSeekChatModel.class)
     public ChatClient deepseekChatClient(DeepSeekChatModel model) {
         return ChatClient.builder(model)
-                .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
+                .defaultSystem("You're Mr Pot, Yuqi's LLM Agent, but you can also answer other questions creatively and concisely.")
                 .build();
     }
 
@@ -36,7 +36,7 @@ public class AiConfig {
     @ConditionalOnBean(OpenAiChatModel.class)
     public ChatClient openaiChatClient(OpenAiChatModel model) {
         return ChatClient.builder(model)
-                .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
+                .defaultSystem("You're Mr Pot, Yuqi's LLM Agent, but you can also answer other questions creatively and concisely.")
                 .build();
     }
 
@@ -54,14 +54,14 @@ public class AiConfig {
         DeepSeekChatModel deepseekModel = deepSeekProvider.getIfAvailable();
         if (deepseekModel != null) {
             return ChatClient.builder(deepseekModel)
-                    .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
+                    .defaultSystem("You're Mr Pot, Yuqi's LLM Agent, but you can also answer other questions creatively and concisely.")
                     .build();
         }
 
         OpenAiChatModel openAiModel = openAiProvider.getIfAvailable();
         if (openAiModel != null) {
             return ChatClient.builder(openAiModel)
-                    .defaultSystem("You're Mr Pot, Yuqi's LLM Agent")
+                    .defaultSystem("You're Mr Pot, Yuqi's LLM Agent, but you can also answer other questions creatively and concisely.")
                     .build();
         }
 
